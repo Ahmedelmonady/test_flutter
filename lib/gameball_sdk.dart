@@ -1,9 +1,12 @@
 library gameball_sdk;
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:gameball_sdk/network/request_calls/get_bot_settings_request.dart';
 import 'package:gameball_sdk/utils/gameball_utils.dart';
 import 'package:gameball_sdk/utils/language_utils.dart';
 import 'package:gameball_sdk/utils/platform_utils.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 import 'package:firebase_dynamic_links/firebase_dynamic_links.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -31,6 +34,8 @@ class GameballApp extends StatelessWidget {
   static String? _referralCode;
   static String? _openDetail;
   static bool? _hideNavigation;
+  static bool _showCloseButton = true;
+  static String? _mainColor = null;
 
   /// Retrieves the singleton instance of the GameballApp class.
   ///
@@ -48,6 +53,25 @@ class GameballApp extends StatelessWidget {
     _platform = platform;
     _shop = shop;
     _apiKey = apiKey;
+
+    //_getBotSettings();
+
+  }
+
+  Future<void> _getBotSettings() async {
+    try {
+      String language = handleLanguage(_lang, _playerPreferredLanguage);
+      getBotSettingsRequest(_apiKey, language)
+          .then((response) {
+        if (response != null) {
+          _mainColor = response.botMainColor.replaceAll("#", "");
+        } else {
+          _mainColor = null;
+        }
+      });
+    } catch (e) {
+      _mainColor = null;
+    }
   }
 
   /// Initializes Firebase Messaging and retrieves the device token.
@@ -108,7 +132,7 @@ class GameballApp extends StatelessWidget {
       return;
     }
 
-    _initializeFirebase();
+    // _initializeFirebase();
 
     referralCodeRegistrationCallback(response, error) {
       if (error == null && response != null) {
@@ -116,8 +140,8 @@ class GameballApp extends StatelessWidget {
       }
     }
 
-    await _handleDynamicLink(referralCodeRegistrationCallback)
-        .then((response) {});
+    // await _handleDynamicLink(referralCodeRegistrationCallback)
+    //     .then((response) {});
 
     final email = playerEmail?.trim();
     final mobile = playerMobile?.trim();
@@ -204,10 +228,13 @@ class GameballApp extends StatelessWidget {
   ///   - `openDetail`: An optional URL to open within the profile.
   ///   - `hideNavigation`: An optional flag to indicate if the navigation bar should be hidden.
   void showProfile(BuildContext context, String playerUniqueId,
-      String? openDetail, bool? hideNavigation) {
+      String? openDetail, bool? hideNavigation, bool? showCloseButton) {
     _playerUniqueId = playerUniqueId;
     _openDetail = openDetail;
     _hideNavigation = hideNavigation;
+    if(showCloseButton != null){
+      _showCloseButton = showCloseButton;
+    }
     _openBottomSheet(context);
   }
 
@@ -224,36 +251,74 @@ class GameballApp extends StatelessWidget {
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
-            top: Radius.circular(20.0)), // Set the top border radius
+          top: Radius.circular(20.0),
+        ),
       ),
       builder: (BuildContext context) {
-        String language = handleLanguage(_lang, _playerPreferredLanguage);
-
-        return SizedBox(
-          height: MediaQuery.of(context).size.height * 0.93,
-          // Adjust the height as desired (e.g., 95% of the screen height)
-          child: Stack(
-            children: [
-              ClipRRect(
+        return GestureDetector(
+          onVerticalDragUpdate: (details) {
+            // Detecting the swipe down gesture
+            if (details.delta.dy > 15) {
+              // Navigator.of(context).pop(); // Close the bottom sheet on swipe down
+            }
+          },
+          child: NotificationListener<OverscrollIndicatorNotification>(
+            onNotification: (notification) {
+              notification.disallowIndicator(); // Disallow overscroll indicator
+              return true;
+            },
+            child: Container(
+              height: MediaQuery.of(context).size.height * 0.93,
+              decoration: BoxDecoration(
                 borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(20.0)), // Set the top border radius
-                child: WebView(
-                  initialUrl: _buildWidgetUrl(),
-                  javascriptMode: JavascriptMode.unrestricted,
+                  top: Radius.circular(20.0),
                 ),
+                color: Colors.transparent,
               ),
-              Positioned(
-                top: 10.0,
-                left: isRtl(language) ? 10.0 : null,
-                right: isLtr(language) ? 10.0 : null,
-                child: IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
-                ),
+              child: Stack(
+                children: [
+                  // WebView
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(20.0),
+                    ),
+                    child: InAppWebView(
+                      initialUrlRequest: URLRequest(url: WebUri(_buildWidgetUrl())),
+                      // onWebViewCreated: (InAppWebViewController controller) {
+                      // },
+                      // onLoadStart: (controller, url) {
+                      // },
+                      // onLoadStop: (controller, url) async {
+                      // },
+                      onScrollChanged: (controller, x, y) {
+                        if (y < 0) {
+                          // User has scrolled to the top of the page
+                          print("Scrolled to the top of the page");
+                          Navigator.of(context).pop(); // Close the bottom sheet on swipe down
+                        }
+                      },
+                      gestureRecognizers: {
+                        Factory<VerticalDragGestureRecognizer>(
+                              () => VerticalDragGestureRecognizer(),
+                        ),
+                      },
+                    ),
+                  ),
+                  // Close button positioned at the top right corner
+                  if(_showCloseButton)
+                    Positioned(
+                      top: 10.0,
+                      right: 10.0,
+                      child: IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                    ),
+                ],
               ),
-            ],
+            ),
           ),
         );
       },
@@ -293,6 +358,12 @@ class GameballApp extends StatelessWidget {
     if (_hideNavigation != null) {
       widgetUrl += '&hideNavigation=$_hideNavigation';
     }
+
+    if(_mainColor != null){
+      widgetUrl += 'main=$_mainColor';
+    }
+
+    print(widgetUrl);
 
     return widgetUrl;
   }
